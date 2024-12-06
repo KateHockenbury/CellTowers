@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zoomable Cell Towers Map</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://d3js.org/topojson.v3.min.js"></script>
+    <style>
+        circle {
+            stroke: none;
+        }
+        .state-boundary {
+            fill: none;
+            stroke: #333;
+            stroke-width: 1px;
+        }
+        .tooltip {
+            position: absolute;
+            background-color: white;
+            border: 1px solid #ccc;
+            padding: 5px;
+            font-size: 12px;
+            pointer-events: none;
+        }
+        .legend {
+            font-size: 12px;
+        }
+        .toggle-box {
+            display: flex;
+            align-items: center;
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body>
+    <svg width="960" height="600"></svg>
+    <div class="tooltip" style="opacity: 0;"></div>
+
+    <div class="legend" style="margin-top: 10px;">
+        <div>
+            <svg width="20" height="20" style="display: inline-block;">
+                <rect width="20" height="20" fill="#00a8e0"></rect>
+            </svg>
+            <span>AT&T</span>
+            <div class="toggle-box">
+                <input type="checkbox" id="toggle-att" checked>
+                <label for="toggle-att">Show</label>
+            </div>
+        </div>
+        <div>
+            <svg width="20" height="20" style="display: inline-block;">
+                <rect width="20" height="20" fill="#bf1111"></rect>
+            </svg>
+            <span>Verizon</span>
+            <div class="toggle-box">
+                <input type="checkbox" id="toggle-verizon" checked>
+                <label for="toggle-verizon">Show</label>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const svg = d3.select("svg");
+        const width = +svg.attr("width");
+        const height = +svg.attr("height");
+
+        const tooltip = d3.select(".tooltip");
+
+        const projection = d3.geoAlbersUsa()
+            .scale(1000)
+            .translate([width / 2, height / 2]);
+
+        const path = d3.geoPath().projection(projection);
+
+        const zoom = d3.zoom()
+            .scaleExtent([1, 8])
+            .on("zoom", zoomed);
+
+        svg.call(zoom);
+
+        let g = svg.append("g");
+
+        // Load TopoJSON data for US states
+        d3.json("https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json").then(us => {
+            // Draw the state boundaries
+            const states = g.append("g")
+                .selectAll("path")
+                .data(topojson.feature(us, us.objects.states).features)
+                .enter().append("path")
+                .attr("class", "state-boundary")
+                .attr("d", path)
+                .on("click", clicked);
+
+            // Load CSV file for scatter plot points
+            d3.csv("celltowers.csv").then(data => {
+                // Plot the points based on latitude and longitude
+                const points = g.append("g")
+                    .attr("class", "points")
+                    .selectAll("circle")
+                    .data(data)
+                    .enter().append("circle")
+                    .attr("cx", d => {
+                        const coords = projection([+d.longitude, +d.latitude]);
+                        return coords ? coords[0] : null;
+                    })
+                    .attr("cy", d => {
+                        const coords = projection([+d.longitude, +d.latitude]);
+                        return coords ? coords[1] : null;
+                    })
+                    .attr("r", 1.5)  
+                    .attr("fill", d => {
+                        if (d.license === "AT&T") return "#00a8e0";
+                        if (d.license === "Verizon") return "#bf1111";
+                        return "gray";
+                    })
+                    .on("mouseover", function(event, d) {
+                        tooltip.transition().duration(200).style("opacity", 1);
+                        tooltip.html(`ID: ${d.id}<br>License: ${d.license}<br>Address: ${d.address}<br>City: ${d.city}<br>State: ${d.state}<br>Structure: ${d.structure}`)
+                            .style("left", (event.pageX + 10) + "px")
+                            .style("top", (event.pageY - 20) + "px");
+                    })
+                    .on("mouseout", function() {
+                        tooltip.transition().duration(200).style("opacity", 0);
+                    });
+
+                // Event listeners for checkboxes
+                d3.select("#toggle-att").on("change", function() {
+                    const visibility = this.checked ? "visible" : "hidden";
+                    points.filter(d => d.license === "AT&T").attr("visibility", visibility);
+                });
+
+                d3.select("#toggle-verizon").on("change", function() {
+                    const visibility = this.checked ? "visible" : "hidden";
+                    points.filter(d => d.license === "Verizon").attr("visibility", visibility);
+                });
+
+            }).catch(error => {
+                console.error("Error loading CSV data:", error);
+            });
+        }).catch(error => {
+            console.error("Error loading state boundaries:", error);
+        });
+
+        function clicked(event, d) {
+            const [[x0, y0], [x1, y1]] = path.bounds(d);
+
+            event.stopPropagation();
+            
+            svg.transition().duration(750).call(
+                zoom.transform,
+                d3.zoomIdentity
+                    .translate(width / 2, height / 2)
+                    .scale(Math.min(8, 0.9 / Math.max((x1 - x0) / width, (y1 - y0) / height)))
+                    .translate(-(x0 + x1) / 2, -(y0 + y1) / 2),
+                d3.pointer(event, svg.node())
+            );
+        }
+
+        function zoomed(event) {
+            const {transform} = event;
+            g.attr("transform", transform);
+            g.attr("stroke-width", 1.5 / transform.k);
+        }
+    </script>
+</body>
+</html>

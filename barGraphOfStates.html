@@ -1,0 +1,345 @@
+<!DOCTYPE html> 
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cell Towers by State</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        /* Header Bar Style */
+        
+        header {
+            width: 100%;
+            text-align: center;
+            padding: 10px;
+            background-color: #f5f5f5;
+            display: flex;
+            align-items: center;
+        }
+
+        
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            height: 100vh;
+        }
+
+        .container {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            padding-top: 50px;
+            width: 100%;
+            max-width: 1200px;
+        }
+
+        .chart-container {
+            flex: 1;
+            text-align: center;
+        }
+
+        .filters {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-left: 20px;
+            max-width: 200px;
+        }
+
+        .filters label {
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .filters input[type="radio"] {
+            margin-right: 5px;
+        }
+
+        .bar {
+            fill: rgb(29, 111, 178);
+        }
+
+        .bar:hover {
+            fill: rgb(255, 225, 28);
+        }
+        .bar.selected {
+            fill: orange !important; /* Highlight color for selected bars */
+    }
+
+
+        .tooltip {
+            position: absolute;
+            background-color: white;
+            border: 1px solid #ccc;
+            padding: 5px;
+            font-size: 12px;
+            pointer-events: none;
+            opacity: 0;
+        }
+
+        .graph-container {
+            display: none;
+            text-align: center;
+        }
+
+        .graph-container.active {
+            display: block;
+        }
+
+        svg {
+            margin: 0 auto;
+            display: block;
+        }
+
+        .header-container {
+          position: relative; /* Allows absolute positioning for child elements */
+          padding: 10px 20px;
+          background-color: #f4f4f9;
+          border-bottom: 2px solid #ddd;
+          height: 60px; /* Sets consistent header height */
+        }
+    
+    h1 {
+      position: absolute;
+      left: 50%;
+      top: 3%;
+      transform: translate(-50%, -50%); /* Center horizontally and vertically */
+      margin: 0;
+      color: #333;
+    }
+
+
+    </style>
+</head>
+<body>
+
+    <!-- Header bar with title -->
+    <header>
+        <button onclick="window.location.href='index.html'">Back to Main Page</button>
+        <h1>Cell Towers by State</h1>
+    </header>
+
+    <div class="container">
+        <!-- Graph containers -->
+        <div class="chart-container">
+            <div id="chart1" class="graph-container active">
+                <svg width="960" height="500"></svg>
+            </div>
+            <div id="chart2" class="graph-container">
+                <svg width="960" height="500"></svg>
+            </div>
+            <div id="chart3" class="graph-container">
+                <svg width="960" height="500"></svg>
+            </div>
+        </div>
+
+        <!-- Filters (Radio buttons) -->
+        <div class="filters">
+            <label>
+                <input type="radio" name="graph-selector" value="chart1" checked> Amount of Cell Towers
+            </label>
+            <label>
+                <input type="radio" name="graph-selector" value="chart2"> Population per Cell Tower
+            </label>
+            <label>
+                <input type="radio" name="graph-selector" value="chart3"> Land Area per Cell Tower
+            </label>
+        </div>
+    </div>
+
+    <div class="tooltip"></div>
+
+
+    <script>
+        const margin = { top: 40, right: 20, bottom: 60, left: 70 };
+        const width = 960 - margin.left - margin.right;
+        const height = 500 - margin.top - margin.bottom;
+
+        const tooltip = d3.select(".tooltip");
+
+        // Prepare SVGs for each chart
+        const svg1 = d3.select("#chart1 svg").append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+        const svg2 = d3.select("#chart2 svg").append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+        const svg3 = d3.select("#chart3 svg").append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+
+        // Load data and render graphs
+        Promise.all([
+            d3.csv("celltowers.csv"),
+            d3.csv("apportionment-2020-table02.csv", d => ({
+                state: d.AREA,
+                population: +d["RESIDENT POPULATION"].replace(/,/g, "")
+            })),
+            d3.csv("LandAreaOfStates.csv", d => ({
+                state: d.State,
+                landArea: +d["Land Area (Sq. Mi.)"]
+            }))
+        ]).then(([cellTowers, populationData, landAreaData]) => {
+            const populationMap = new Map(populationData.map(d => [d.state, d.population]));
+            const landAreaMap = new Map(landAreaData.map(d => [d.state, d.landArea]));
+
+            const mergedData = d3.rollups(cellTowers, v => v.length, d => d.state)
+                .map(([state, count]) => ({
+                    state,
+                    count,
+                    population: populationMap.get(state) || 0,
+                    landArea: landAreaMap.get(state) || 0
+                }));
+
+            // Prepare data for each graph
+            const data1 = mergedData
+                .filter(d => d.state !== "District of Columbia" && d.state !== "DC")
+                .sort((a, b) => d3.descending(a.count, b.count));
+
+            const data2 = mergedData
+                .filter(d => d.state !== "District of Columbia" && d.state !== "DC")
+                .map(d => ({ ...d, populationPerTower: d.population / d.count }))
+                .sort((a, b) => d3.descending(a.populationPerTower, b.populationPerTower));
+
+            const data3 = mergedData
+                .filter(d => d.state !== "District of Columbia" && d.state !== "DC")
+                .map(d => ({ ...d, landAreaPerTower: d.landArea / d.count }))
+                .sort((a, b) => d3.descending(a.landAreaPerTower, b.landAreaPerTower));
+
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+                const selectedStates = new Set(); // To keep track of selected states
+
+const renderGraph = (data, svg, yKey, yLabel, graphTitle) => {
+    const x = d3.scaleBand().domain(data.map(d => d.state)).range([0, width]).padding(0.1);
+    const y = d3.scaleLinear().domain([0, d3.max(data, d => d[yKey])]).nice().range([height, 0]);
+
+    // Clear previous content
+    svg.selectAll("*").remove();
+
+    // Add graph title
+    svg.append("text")
+        .attr("x", width / 2)
+        .attr("y", -10) 
+        .attr("text-anchor", "middle")
+        .style("font-size", "40px")
+        .style("font-weight", "bold")
+        .text(graphTitle);
+
+    // X and Y axes
+    svg.append("g")
+        .attr("transform", `translate(0,${height})`)
+        .call(d3.axisBottom(x))
+        .selectAll("text")
+        .attr("transform", "rotate(-45)")
+        .style("text-anchor", "end");
+
+    svg.append("g").call(d3.axisLeft(y));
+
+    // X-axis title
+    svg.append("text")
+        .attr("x", width / 2)
+        .attr("y", height + margin.bottom - 10)
+        .attr("text-anchor", "middle")
+        .style("font-size", "20px")
+        .text("State");
+
+    // Y-axis title
+    svg.append("text")
+        .attr("transform", "rotate(-90)")
+        .attr("x", -height / 2)
+        .attr("y", -margin.left + 15)
+        .attr("text-anchor", "middle")
+        .style("font-size", "20px")
+        .text(yLabel);
+
+    // Bars
+    const bars = svg.selectAll(".bar")
+        .data(data)
+        .enter().append("rect")
+        .attr("class", d => `bar ${selectedStates.has(d.state) ? "selected" : ""}`) // Add 'selected' class if state is selected
+        .attr("x", d => x(d.state))
+        .attr("y", d => y(d[yKey]))
+        .attr("width", x.bandwidth())
+        .attr("height", d => height - y(d[yKey]))
+        .on("mouseover", (event, d) => {
+            tooltip.style("opacity", 1)
+                .html(`<strong>State:</strong> ${d.state}<br><strong>${yLabel}:</strong> ${d[yKey]}`)
+                .style("left", `${event.pageX + 10}px`)
+                .style("top", `${event.pageY - 20}px`);
+        })
+        .on("mouseout", () => tooltip.style("opacity", 0))
+        .on("click", (event, d) => {
+            // Toggle state selection
+            if (selectedStates.has(d.state)) {
+                selectedStates.delete(d.state);
+            } else {
+                selectedStates.add(d.state);
+            }
+            // Update highlighting
+            d3.selectAll(".bar").classed("selected", d => selectedStates.has(d.state));
+        });
+};
+
+// Apply 'selected' class styling in CSS
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            // Render graphs with titles and axis labels
+            renderGraph(data1, svg1, "count", "Number of Cell Towers", "Amount of Cell Towers by State");
+            renderGraph(data2, svg2, "populationPerTower", "Population per Tower", "Population per Cell Tower by State");
+            renderGraph(data3, svg3, "landAreaPerTower", "Land Area per Tower", "Land Area per Cell Tower by State");
+
+
+
+            const updateGraphVisibility = (selectedId) => {
+    d3.selectAll(".graph-container").classed("active", false);
+    d3.select(`#${selectedId}`).classed("active", true);
+
+    // Re-render the active graph to ensure highlighting is consistent
+    if (selectedId === "chart1") renderGraph(data1, svg1, "count", "Number of Cell Towers", "Amount of Cell Towers by State");
+    if (selectedId === "chart2") renderGraph(data2, svg2, "populationPerTower", "Population per Tower", "Population per Cell Tower by State");
+    if (selectedId === "chart3") renderGraph(data3, svg3, "landAreaPerTower", "Land Area per Tower", "Land Area per Cell Tower by State");
+};
+
+d3.selectAll("input[name='graph-selector']").on("change", function () {
+    updateGraphVisibility(this.value);
+});
+
+            
+        }).catch(error => console.error("Error loading data:", error));
+    </script>
+
+</body>
+</html>
